@@ -414,14 +414,39 @@ def auth_list_command(args) -> None:
         if not entries:
             continue
         current = pool.peek()
-        print(f"{provider} ({len(entries)} credentials):")
+        rows = []
         for idx, entry in enumerate(entries, start=1):
-            marker = "  "
-            if current is not None and entry.id == current.id:
-                marker = "← "
-            status = _format_exhausted_status(entry)
-            source = _display_source(entry.source)
-            print(f"  #{idx}  {entry.label:<20} {entry.auth_type:<7} {source}{status} {marker}".rstrip())
+            rows.append((
+                "←" if current is not None and entry.id == current.id else "",
+                f"#{idx}",
+                str(entry.label),
+                str(entry.auth_type),
+                _display_source(entry.source),
+                _format_exhausted_status(entry).strip() or "active",
+            ))
+        headers = ("", "#", "Label", "Type", "Source", "Status")
+        widths = [
+            max(len(headers[col]), *(len(row[col]) for row in rows))
+            for col in range(len(headers))
+        ]
+        print(f"{provider} ({len(entries)} credentials):")
+        print(
+            f"  {headers[0]:<{widths[0]}}  "
+            f"{headers[1]:>{widths[1]}}  "
+            f"{headers[2]:<{widths[2]}}  "
+            f"{headers[3]:<{widths[3]}}  "
+            f"{headers[4]:<{widths[4]}}  "
+            f"{headers[5]}"
+        )
+        for marker, idx_label, label, auth_type, source, status in rows:
+            print(
+                f"  {marker:<{widths[0]}}  "
+                f"{idx_label:>{widths[1]}}  "
+                f"{label:<{widths[2]}}  "
+                f"{auth_type:<{widths[3]}}  "
+                f"{source:<{widths[4]}}  "
+                f"{status}"
+            )
         print()
 
 

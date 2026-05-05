@@ -661,6 +661,51 @@ def test_auth_list_does_not_call_mutating_select(monkeypatch, capsys):
     assert "primary" in out
 
 
+def test_auth_list_aligns_long_labels_and_current_marker(monkeypatch, capsys):
+    from hermes_cli.auth_commands import auth_list_command
+
+    class _Entry:
+        def __init__(self, ident, label, auth_type="oauth", source="device_code"):
+            self.id = ident
+            self.label = label
+            self.auth_type = auth_type
+            self.source = source
+            self.last_status = None
+            self.last_error_code = None
+            self.last_status_at = None
+
+    entries = [
+        _Entry("cred-1", "short"),
+        _Entry("cred-2", "very-long-email-address@example.com"),
+    ]
+
+    class _Pool:
+        def entries(self):
+            return entries
+
+        def peek(self):
+            return entries[1]
+
+    monkeypatch.setattr("hermes_cli.auth_commands.load_pool", lambda provider: _Pool())
+
+    class _Args:
+        provider = "openai-codex"
+
+    auth_list_command(_Args())
+
+    out = capsys.readouterr().out.splitlines()
+    header = next(line for line in out if "Label" in line and "Status" in line)
+    first = next(line for line in out if "short" in line)
+    second = next(line for line in out if "very-long-email-address@example.com" in line)
+    assert "active" in first
+    assert "active" in second
+    assert first.startswith("     #1")
+    assert second.startswith("  ←  #2")
+    assert first.index("oauth") == second.index("oauth") == header.index("Type")
+    assert first.index("device_code") == second.index("device_code") == header.index("Source")
+    assert first.index("active") == second.index("active") == header.index("Status")
+
+
 def test_auth_list_shows_exhausted_cooldown(monkeypatch, capsys):
     from hermes_cli.auth_commands import auth_list_command
 
