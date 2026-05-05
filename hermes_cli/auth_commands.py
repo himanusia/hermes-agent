@@ -414,14 +414,22 @@ def auth_list_command(args) -> None:
         if not entries:
             continue
         current = pool.peek()
+        label_width = max(20, *(len(str(entry.label)) for entry in entries))
+        auth_type_width = max(7, *(len(str(entry.auth_type)) for entry in entries))
+        source_width = max(10, *(len(_display_source(entry.source)) for entry in entries))
+        index_width = len(str(len(entries)))
         print(f"{provider} ({len(entries)} credentials):")
         for idx, entry in enumerate(entries, start=1):
-            marker = "  "
-            if current is not None and entry.id == current.id:
-                marker = "← "
+            marker = "←" if current is not None and entry.id == current.id else " "
             status = _format_exhausted_status(entry)
             source = _display_source(entry.source)
-            print(f"  #{idx}  {entry.label:<20} {entry.auth_type:<7} {source}{status} {marker}".rstrip())
+            print(
+                f"  {marker} #{idx:<{index_width}}  "
+                f"{str(entry.label):<{label_width}}  "
+                f"{str(entry.auth_type):<{auth_type_width}}  "
+                f"{source:<{source_width}}{status}"
+                .rstrip()
+            )
         print()
 
 
