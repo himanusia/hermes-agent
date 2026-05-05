@@ -10,6 +10,7 @@ def _make_adapter(
     free_response_chats=None,
     mention_patterns=None,
     ignored_threads=None,
+    allowed_threads=None,
     allow_from=None,
     group_allow_from=None,
 ):
@@ -24,6 +25,12 @@ def _make_adapter(
         extra["mention_patterns"] = mention_patterns
     if ignored_threads is not None:
         extra["ignored_threads"] = ignored_threads
+    else:
+        extra["ignored_threads"] = []
+    if allowed_threads is not None:
+        extra["allowed_threads"] = allowed_threads
+    else:
+        extra["allowed_threads"] = []
     if allow_from is not None:
         extra["allow_from"] = allow_from
     if group_allow_from is not None:
@@ -158,6 +165,14 @@ def test_ignored_threads_drop_group_messages_before_other_gates():
     assert adapter._should_process_message(_group_message("hello everyone", chat_id=-200, thread_id=99)) is True
 
 
+def test_allowed_threads_drop_group_messages_outside_allowlist_before_other_gates():
+    adapter = _make_adapter(require_mention=False, free_response_chats=["-200"], allowed_threads=["2904"])
+
+    assert adapter._should_process_message(_group_message("hello agus", chat_id=-200, thread_id=2904)) is True
+    assert adapter._should_process_message(_group_message("hello other", chat_id=-200, thread_id=2903)) is False
+    assert adapter._should_process_message(_group_message("hello no topic", chat_id=-200, thread_id=None)) is False
+
+
 def test_regex_mention_patterns_allow_custom_wake_words():
     adapter = _make_adapter(require_mention=True, mention_patterns=[r"^\s*chompy\b"])
 
@@ -182,7 +197,11 @@ def test_config_bridges_telegram_group_settings(monkeypatch, tmp_path):
         "  mention_patterns:\n"
         "    - \"^\\\\s*chompy\\\\b\"\n"
         "  free_response_chats:\n"
-        "    - \"-123\"\n",
+        "    - \"-123\"\n"
+        "  ignored_threads:\n"
+        "    - 2903\n"
+        "  allowed_threads:\n"
+        "    - 2904\n",
         encoding="utf-8",
     )
 
@@ -190,6 +209,8 @@ def test_config_bridges_telegram_group_settings(monkeypatch, tmp_path):
     monkeypatch.delenv("TELEGRAM_REQUIRE_MENTION", raising=False)
     monkeypatch.delenv("TELEGRAM_MENTION_PATTERNS", raising=False)
     monkeypatch.delenv("TELEGRAM_FREE_RESPONSE_CHATS", raising=False)
+    monkeypatch.delenv("TELEGRAM_IGNORED_THREADS", raising=False)
+    monkeypatch.delenv("TELEGRAM_ALLOWED_THREADS", raising=False)
 
     config = load_gateway_config()
 
@@ -197,6 +218,8 @@ def test_config_bridges_telegram_group_settings(monkeypatch, tmp_path):
     assert __import__("os").environ["TELEGRAM_REQUIRE_MENTION"] == "true"
     assert json.loads(__import__("os").environ["TELEGRAM_MENTION_PATTERNS"]) == [r"^\s*chompy\b"]
     assert __import__("os").environ["TELEGRAM_FREE_RESPONSE_CHATS"] == "-123"
+    assert __import__("os").environ["TELEGRAM_IGNORED_THREADS"] == "2903"
+    assert __import__("os").environ["TELEGRAM_ALLOWED_THREADS"] == "2904"
 
 
 def test_config_bridges_telegram_user_allowlists(monkeypatch, tmp_path):

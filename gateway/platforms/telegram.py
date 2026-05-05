@@ -2778,6 +2778,27 @@ class TelegramAdapter(BasePlatformAdapter):
                 logger.warning("[%s] Ignoring invalid Telegram thread id: %r", self.name, value)
         return ignored
 
+    def _telegram_allowed_threads(self) -> set[int]:
+        raw = self.config.extra.get("allowed_threads")
+        if raw is None:
+            raw = os.getenv("TELEGRAM_ALLOWED_THREADS", "")
+
+        if isinstance(raw, list):
+            values = raw
+        else:
+            values = str(raw).split(",")
+
+        allowed: set[int] = set()
+        for value in values:
+            text = str(value).strip()
+            if not text:
+                continue
+            try:
+                allowed.add(int(text))
+            except (TypeError, ValueError):
+                logger.warning("[%s] Ignoring invalid Telegram allowed thread id: %r", self.name, value)
+        return allowed
+
     def _compile_mention_patterns(self) -> List[re.Pattern]:
         """Compile optional regex wake-word patterns for group triggers."""
         patterns = self.config.extra.get("mention_patterns")
@@ -2921,6 +2942,14 @@ class TelegramAdapter(BasePlatformAdapter):
         if not self._is_group_chat(message):
             return True
         thread_id = getattr(message, "message_thread_id", None)
+        allowed_threads = self._telegram_allowed_threads()
+        if allowed_threads:
+            try:
+                if thread_id is None or int(thread_id) not in allowed_threads:
+                    return False
+            except (TypeError, ValueError):
+                logger.warning("[%s] Ignoring non-numeric Telegram message_thread_id: %r", self.name, thread_id)
+                return False
         if thread_id is not None:
             try:
                 if int(thread_id) in self._telegram_ignored_threads():
