@@ -110,6 +110,30 @@ def _display_source(source: str) -> str:
     return source.split(":", 1)[1] if source.startswith("manual:") else source
 
 
+def _display_label(label: str, width: int = 20) -> str:
+    """Return a compact label for fixed-width `hermes auth list` output."""
+    label = str(label or "").strip()
+    if len(label) <= width:
+        return label
+
+    if "@" in label:
+        local, domain = label.split("@", 1)
+        domain_suffix = f"@{domain}"
+        if len(domain_suffix) < width - 4:
+            return f"{local[: width - len(domain_suffix) - 1]}…{domain_suffix}"
+
+    return f"{label[: width - 1]}…"
+
+
+def _display_entry_label(provider: str, entry) -> str:
+    label = str(getattr(entry, "label", "") or "").strip()
+    if provider == "openai-codex" and label.startswith("openai-codex-oauth-"):
+        derived = label_from_token(str(getattr(entry, "access_token", "") or ""), label)
+        if derived != label:
+            return derived
+    return label
+
+
 def _classify_exhausted_status(entry) -> tuple[str, bool]:
     code = getattr(entry, "last_error_code", None)
     reason = str(getattr(entry, "last_error_reason", "") or "").strip().lower()
@@ -421,7 +445,8 @@ def auth_list_command(args) -> None:
                 marker = "← "
             status = _format_exhausted_status(entry)
             source = _display_source(entry.source)
-            print(f"  #{idx}  {entry.label:<20} {entry.auth_type:<7} {source}{status} {marker}".rstrip())
+            label = _display_label(_display_entry_label(provider, entry))
+            print(f"  #{idx}  {label:<20} {entry.auth_type:<7} {source}{status} {marker}".rstrip())
         print()
 
 

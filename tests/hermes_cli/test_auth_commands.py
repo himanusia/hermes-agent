@@ -17,12 +17,14 @@ def _write_auth_store(tmp_path, payload: dict) -> None:
     (hermes_home / "auth.json").write_text(json.dumps(payload, indent=2))
 
 
-def _jwt_with_email(email: str) -> str:
+def _jwt_with_claims(claims: dict) -> str:
     header = base64.urlsafe_b64encode(b'{"alg":"RS256","typ":"JWT"}').rstrip(b"=").decode()
-    payload = base64.urlsafe_b64encode(
-        json.dumps({"email": email}).encode()
-    ).rstrip(b"=").decode()
+    payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).rstrip(b"=").decode()
     return f"{header}.{payload}.signature"
+
+
+def _jwt_with_email(email: str) -> str:
+    return _jwt_with_claims({"email": email})
 
 
 @pytest.fixture(autouse=True)
@@ -622,6 +624,69 @@ def test_reset_config_provider_uses_atomic_yaml_write(tmp_path, monkeypatch):
 
     assert mock_write.call_count == 1
     assert config_path.read_text(encoding="utf-8") == original_text
+
+
+def test_auth_list_derives_codex_default_label_from_profile_claim(monkeypatch, capsys):
+    from hermes_cli.auth_commands import auth_list_command
+
+    class _Entry:
+        id = "cred-1"
+        label = "openai-codex-oauth-8"
+        auth_type = "oauth"
+        source = "manual:device_code"
+        access_token = _jwt_with_claims({"https://api.openai.com/profile": {"email": "codex@example.com"}})
+        last_status = None
+        last_error_code = None
+        last_status_at = None
+
+    class _Pool:
+        def entries(self):
+            return [_Entry()]
+
+        def peek(self):
+            return None
+
+    monkeypatch.setattr("hermes_cli.auth_commands.load_pool", lambda provider: _Pool())
+
+    class _Args:
+        provider = "openai-codex"
+
+    auth_list_command(_Args())
+
+    out = capsys.readouterr().out
+    assert "codex@example.com" in out
+    assert "openai-codex-oauth-8" not in out
+
+
+def test_auth_list_truncates_long_email_labels(monkeypatch, capsys):
+    from hermes_cli.auth_commands import auth_list_command
+
+    class _Entry:
+        id = "cred-1"
+        label = "verylongemailaccount@example.com"
+        auth_type = "oauth"
+        source = "manual:device_code"
+        last_status = None
+        last_error_code = None
+        last_status_at = None
+
+    class _Pool:
+        def entries(self):
+            return [_Entry()]
+
+        def peek(self):
+            return None
+
+    monkeypatch.setattr("hermes_cli.auth_commands.load_pool", lambda provider: _Pool())
+
+    class _Args:
+        provider = "openai-codex"
+
+    auth_list_command(_Args())
+
+    out = capsys.readouterr().out
+    assert "verylon…@example.com" in out
+    assert "verylongemailaccount@example.com" not in out
 
 
 def test_auth_list_does_not_call_mutating_select(monkeypatch, capsys):

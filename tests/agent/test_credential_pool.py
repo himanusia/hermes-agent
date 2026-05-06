@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import time
 
@@ -12,6 +13,33 @@ def _write_auth_store(tmp_path, payload: dict) -> None:
     hermes_home = tmp_path / "hermes"
     hermes_home.mkdir(parents=True, exist_ok=True)
     (hermes_home / "auth.json").write_text(json.dumps(payload, indent=2))
+
+
+def _jwt_with_claims(claims: dict) -> str:
+    header = base64.urlsafe_b64encode(b'{"alg":"RS256","typ":"JWT"}').rstrip(b"=").decode()
+    payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).rstrip(b"=").decode()
+    return f"{header}.{payload}.signature"
+
+
+def test_label_from_token_uses_openai_profile_email():
+    from agent.credential_pool import label_from_token
+
+    token = _jwt_with_claims({"https://api.openai.com/profile": {"email": "codex@example.com"}})
+
+    assert label_from_token(token, "openai-codex-oauth-8") == "codex@example.com"
+
+
+def test_label_from_token_falls_back_to_openai_chatgpt_account_id():
+    from agent.credential_pool import label_from_token
+
+    token = _jwt_with_claims({
+        "https://api.openai.com/auth": {
+            "chatgpt_account_id": "acct_123456789abcdef",
+            "chatgpt_plan_type": "plus",
+        }
+    })
+
+    assert label_from_token(token, "openai-codex-oauth-8") == "codex-plus-acct_123"
 
 
 def test_fill_first_selection_skips_recently_exhausted_entry(tmp_path, monkeypatch):
