@@ -18297,7 +18297,7 @@ ipcMain.handle('hermes:vscode-theme:search', async (_event, query) => searchMark
 
 // ---------------------------------------------------------------------------
 // hermes:// deep links (e.g. hermes://blueprint/morning-brief?time=08:00,
-// hermes://mcp/install?name=NAME&config=B64 — the vendor "Add to Hermes"
+// hermes://session/<stored-id>, hermes://mcp/install?name=NAME&config=B64 — the vendor "Add to Hermes"
 // button, or hermes://plugin/install?repo=owner/repo). Dev
 // (`HERMES_DESKTOP_DEV_SERVER`) registers hermes-dev:// instead — bare
 // Electron or a stale OS handler often owns hermes:// on dev machines.
@@ -18348,7 +18348,16 @@ function handleDeepLink(url) {
 
   // hermes://blueprint/<key>?slot=val  -> host="blueprint", path="/<key>"
   const kind = parsed.hostname || ''
-  const name = decodeURIComponent((parsed.pathname || '').replace(/^\//, ''))
+  let name: string
+
+  try {
+    name = decodeURIComponent((parsed.pathname || '').replace(/^\//, ''))
+  } catch {
+    rememberLog(`[deeplink] ignoring malformed path: ${parsed.pathname || ''}`)
+
+    return
+  }
+
   const params = {}
   parsed.searchParams.forEach((v, k) => {
     params[k] = v

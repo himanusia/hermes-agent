@@ -5,6 +5,7 @@ import { resumeAccountConnect } from '@/app/capabilities/connectors/data/deep-li
 import { closeActiveTab } from '@/app/chat/close-tab'
 import { commandFocusedPreview } from '@/app/chat/right-rail/preview-nav'
 import { openSession } from '@/app/open-session'
+import { resolveSessionOwner, resolveStoredSession } from '@/app/session/hooks/use-session-actions/utils'
 import { openConnectionDoneLink } from '@/components/assistant-ui/connector-tool'
 import { $diskPluginsScanPending } from '@/contrib/runtime-loader'
 import { getSession } from '@/hermes'
@@ -33,6 +34,7 @@ import {
   setRememberedRoute,
   setRememberedSessionId
 } from '@/store/session'
+import { isSessionOwnerRoute, type SessionOwnerScope } from '@/store/session-request-router'
 import { $botChatScopes, $sessionTiles, storedSessionIdForRuntimeId } from '@/store/session-states'
 import { onSessionsChanged } from '@/store/session-sync'
 import { requestSkillInstallFromDeepLink } from '@/store/skill-deeplink-install'
@@ -46,6 +48,64 @@ import { appViewForPath, isOverlayView, NEW_CHAT_ROUTE, routeSessionId, sessionR
 import { resolveRememberedSessionId } from './remembered-session'
 
 type RememberedSession = Pick<SessionInfo, '_lineage_root_id' | 'id' | 'parent_session_id' | 'profile' | 'source'>
+
+function sessionWorkspaceScope(storedSessionId: string, owner?: SessionOwnerScope) {
+  const existing =
+    $sessionTiles.get().find(tile => tile.storedSessionId === storedSessionId) ?? $botChatScopes.get()[storedSessionId]
+
+  if (existing) {
+    return { ...existing, workspaceMode: existing.workspaceMode ?? ('sessions' as const) }
+  }
+
+  if (isSessionOwnerRoute(owner)) {
+    return { ownerRoute: owner, workspaceMode: 'sessions' as const }
+  }
+
+  if (typeof owner === 'string' && owner.trim()) {
+    return { ownerProfile: owner.trim(), workspaceMode: 'sessions' as const }
+  }
+
+  return { workspaceMode: 'sessions' as const }
+}
+
+function openExternalSession(
+  storedSessionId: string,
+  locationPathname: string,
+  navigate: (to: string, options?: { replace?: boolean }) => void,
+  owner?: SessionOwnerScope
+): void {
+  if (isOverlayView(appViewForPath(locationPathname))) {
+    navigate(sessionRoute($selectedStoredSessionId.get() ?? ''), { replace: true })
+  }
+
+  openSession(storedSessionId, navigate, 'stack', sessionWorkspaceScope(storedSessionId, owner))
+}
+
+async function resolveAndOpenDeepLinkedSession(
+  storedSessionId: string,
+  locationPathname: string,
+  navigate: (to: string, options?: { replace?: boolean }) => void
+): Promise<void> {
+  try {
+    const session = await resolveStoredSession(storedSessionId)
+
+    // The URL must name an exact durable id (or a known lineage alias), not a
+    // runtime id or a backend prefix that happened to resolve to another row.
+    if (!session || !sessionMatchesStoredId(session, storedSessionId)) {
+      return
+    }
+
+    const owner = await resolveSessionOwner(storedSessionId)
+
+    if (!owner) {
+      return
+    }
+
+    openExternalSession(storedSessionId, locationPathname, navigate, owner)
+  } catch {
+    // A deleted/unknown session and a failed owner probe are both fail-closed.
+  }
+}
 
 interface DesktopIntegrationsParams {
   activeProfile: string
@@ -298,19 +358,7 @@ export function useDesktopIntegrations({
         const storedId = viaLocalMap !== sessionId ? viaLocalMap : (storedSessionIdForRuntimeId(sessionId) ?? sessionId)
 
         // A notification reveals a tab; it must not reclassify a Bot chat.
-        const scope =
-          $sessionTiles.get().find(tile => tile.storedSessionId === storedId) ?? $botChatScopes.get()[storedId]
-
-        if (isOverlayView(appViewForPath(locationPathname))) {
-          navigate(sessionRoute($selectedStoredSessionId.get() ?? ''), { replace: true })
-        }
-
-        openSession(
-          storedId,
-          navigate,
-          'stack',
-          scope && { ...scope, workspaceMode: scope.workspaceMode ?? 'sessions' }
-        )
+        openExternalSession(storedId, locationPathname, navigate)
       }
     })
 
@@ -366,6 +414,8 @@ export function useDesktopIntegrations({
   //    modal awaiting explicit confirmation. Never auto-installs.
   //  - skill/install?identifier=… → confirmation, then the existing hub pipeline
   //  - blueprint/<name>?… → reviewable /blueprint command in the composer
+  //  - session/<stored-id> → exact durable-row/owner validation, then the same
+  //    stack open used by native notification clicks
   //  - <plugin>/<path>?… → in-app navigate (e.g. index-network/intent/1)
   //  - open/<path>?… → in-app navigate (generic)
   useEffect(() => {
@@ -439,7 +489,19 @@ export function useDesktopIntegrations({
         return
       }
 
+      if (action.type === 'session') {
+        void resolveAndOpenDeepLinkedSession(action.sessionId, locationPathname, navigate)
+
+        return
+      }
+
       if (payload.kind === 'skill') {
+        return
+      }
+
+      // `session` is first-party and reserved even when its id failed parsing;
+      // never let a malformed/deleted session link fall through as a plugin path.
+      if (payload.kind === 'session') {
         return
       }
 
@@ -456,7 +518,7 @@ export function useDesktopIntegrations({
     void window.hermesDesktop?.signalDeepLinkReady?.()
 
     return () => unsubscribe?.()
-  }, [navigate, runtimeIdByStoredSessionId])
+  }, [locationPathname, navigate, runtimeIdByStoredSessionId])
 
   // ⌘W via the macOS menu accelerator → close the focused tab; if nothing is
   // closeable, fall back to closing the window (so ⌘W still works as the

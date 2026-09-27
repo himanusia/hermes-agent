@@ -19,6 +19,13 @@ import { sessionRoute } from '../../routes'
 
 import { useDesktopIntegrations } from './use-desktop-integrations'
 
+const sessionDeepLinkResolution = vi.hoisted(() => ({
+  resolveSessionOwner: vi.fn(),
+  resolveStoredSession: vi.fn()
+}))
+
+vi.mock('@/app/session/hooks/use-session-actions/utils', () => sessionDeepLinkResolution)
+
 // Mutable HUD-window flag so the restore tests can flip the window kind the
 // hook believes it runs in. Default false keeps the pre-existing restore
 // coverage exercising the real main-window path.
@@ -66,6 +73,8 @@ describe('useDesktopIntegrations', () => {
     vi.mocked(requestMcpInstallFromDeepLink).mockClear()
     vi.mocked(requestPluginCatalogInstallFromDeepLink).mockClear()
     vi.mocked(openPluginInstallRequest).mockClear()
+    sessionDeepLinkResolution.resolveSessionOwner.mockReset()
+    sessionDeepLinkResolution.resolveStoredSession.mockReset()
     navigate = vi.fn()
     // Every test starts as a main window; only the HUD describe flips this.
     hudWindowMock.mockReturnValue(false)
@@ -671,6 +680,76 @@ describe('useDesktopIntegrations', () => {
       deepLink?.({ kind: 'plugin', name: 'install', params: { catalog: 'weather', repo: 'evil/repo' } })
       expect(requestPluginCatalogInstallFromDeepLink).toHaveBeenCalledWith('weather')
       expect(openPluginInstallRequest).not.toHaveBeenCalled()
+      expect(navigate).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('first-party session deep links', () => {
+    it('resolves the stored session owner before reusing notification stack navigation', async () => {
+      let deepLink: ((payload: { kind: string; name: string; params: Record<string, string> }) => void) | undefined
+      const row = session({ connection_id: 'remote-writer', id: 'stored-session', profile: 'writer' })
+      const owner = { connectionId: 'remote-writer', mode: 'remote' as const, profile: 'writer' }
+
+      desktopWindow.hermesDesktop = {
+        ...desktopWindow.hermesDesktop,
+        onDeepLink: (cb: (payload: { kind: string; name: string; params: Record<string, string> }) => void) => {
+          deepLink = cb
+
+          return () => undefined
+        },
+        signalDeepLinkReady: vi.fn()
+      } as unknown as Window['hermesDesktop']
+      sessionDeepLinkResolution.resolveStoredSession.mockResolvedValue(row)
+      sessionDeepLinkResolution.resolveSessionOwner.mockResolvedValue(owner)
+
+      render({ profileReady: true, resumeLastSession: false, sessions: [row] })
+      await act(async () => deepLink?.({ kind: 'session', name: row.id, params: { profile: 'untrusted' } }))
+
+      expect(sessionDeepLinkResolution.resolveStoredSession).toHaveBeenCalledWith(row.id)
+      expect(sessionDeepLinkResolution.resolveSessionOwner).toHaveBeenCalledWith(row.id)
+      // An unoccupied main draft is spent by the shared notification/stack path.
+      expect(navigate).toHaveBeenCalledWith(sessionRoute(row.id))
+    })
+
+    it('fails closed for an unknown or deleted durable session without plugin navigation', async () => {
+      let deepLink: ((payload: { kind: string; name: string; params: Record<string, string> }) => void) | undefined
+
+      desktopWindow.hermesDesktop = {
+        ...desktopWindow.hermesDesktop,
+        onDeepLink: (cb: (payload: { kind: string; name: string; params: Record<string, string> }) => void) => {
+          deepLink = cb
+
+          return () => undefined
+        },
+        signalDeepLinkReady: vi.fn()
+      } as unknown as Window['hermesDesktop']
+      sessionDeepLinkResolution.resolveStoredSession.mockResolvedValue(undefined)
+
+      render({ profileReady: true, resumeLastSession: false, sessions: [] })
+      await act(async () => deepLink?.({ kind: 'session', name: '20260927_141323_deleted', params: {} }))
+
+      expect(sessionDeepLinkResolution.resolveStoredSession).toHaveBeenCalledWith('20260927_141323_deleted')
+      expect(sessionDeepLinkResolution.resolveSessionOwner).not.toHaveBeenCalled()
+      expect(navigate).not.toHaveBeenCalled()
+    })
+
+    it('ignores malformed session links before owner resolution', () => {
+      let deepLink: ((payload: { kind: string; name: string; params: Record<string, string> }) => void) | undefined
+
+      desktopWindow.hermesDesktop = {
+        ...desktopWindow.hermesDesktop,
+        onDeepLink: (cb: (payload: { kind: string; name: string; params: Record<string, string> }) => void) => {
+          deepLink = cb
+
+          return () => undefined
+        },
+        signalDeepLinkReady: vi.fn()
+      } as unknown as Window['hermesDesktop']
+
+      render({ profileReady: true, resumeLastSession: false, sessions: [] })
+      deepLink?.({ kind: 'session', name: 'stored/session', params: { profile: 'evil' } })
+
+      expect(sessionDeepLinkResolution.resolveStoredSession).not.toHaveBeenCalled()
       expect(navigate).not.toHaveBeenCalled()
     })
   })

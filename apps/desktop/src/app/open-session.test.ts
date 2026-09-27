@@ -141,6 +141,22 @@ describe('openSession', () => {
     expect(openSessionTile).toHaveBeenCalledWith('s1', 'center', undefined, undefined, scope)
   })
 
+  it('threads a resolved connection owner into a stacked session tile', () => {
+    const scope = {
+      ownerRoute: { connectionId: 'remote-writer', mode: 'remote' as const, profile: 'writer' },
+      workspaceMode: 'sessions' as const
+    }
+
+    $selectedStoredSessionId.set('main-session')
+    focusOpenSession.mockReturnValue(null)
+
+    openSession('s1', navigate, 'stack', scope)
+
+    expect(setSessionTileWorkspaceScope).toHaveBeenCalledWith('s1', scope)
+    expect(openSessionTile).toHaveBeenCalledWith('s1', 'center')
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
   it('stack focuses a session that is already on screen', () => {
     $selectedStoredSessionId.set('s0')
     focusOpenSession.mockReturnValue('tile')

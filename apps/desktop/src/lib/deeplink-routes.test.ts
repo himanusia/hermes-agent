@@ -1,8 +1,29 @@
 import { describe, expect, it } from 'vitest'
 
-import { resolveDeepLinkAction } from './deeplink-routes'
+import { parseSessionDeepLinkId, resolveDeepLinkAction } from './deeplink-routes'
 
 describe('resolveDeepLinkAction', () => {
+  it('routes a canonical session deep link by its exact durable id', () => {
+    const sessionId = '20260927_141323_abcdef'
+
+    expect(
+      resolveDeepLinkAction({
+        kind: 'session',
+        name: sessionId,
+        params: { profile: 'untrusted-profile' }
+      })
+    ).toEqual({ type: 'session', sessionId })
+  })
+
+  it('fails closed for empty, encoded-path, and malformed session ids', () => {
+    for (const name of ['', ' ', 'stored/id', 'stored?profile=evil', 'stored#fragment', '%E0%A4%A']) {
+      const payload = { kind: 'session', name, params: { profile: 'evil' } }
+
+      expect(parseSessionDeepLinkId(payload)).toBeNull()
+      expect(resolveDeepLinkAction(payload)).toEqual({ type: 'ignore' })
+    }
+  })
+
   it('routes unified plugin install deeplinks', () => {
     expect(
       resolveDeepLinkAction({

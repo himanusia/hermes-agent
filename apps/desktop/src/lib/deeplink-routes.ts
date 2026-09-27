@@ -12,6 +12,7 @@ export type DeepLinkAction =
    *  catalog by the caller; the raw name is never treated as a git identifier. */
   | { type: 'plugin-catalog-install'; name: string }
   | { type: 'skill-install'; identifier: string }
+  | { type: 'session'; sessionId: string }
   | { type: 'composer-blueprint'; name: string; params: Record<string, string> }
   | { type: 'connection-done'; op: string; status: string }
   | { type: 'ignore' }
@@ -26,8 +27,33 @@ function truthyParam(value: string | undefined, defaultValue = false): boolean {
   return normalized === '1' || normalized === 'true' || normalized === 'yes'
 }
 
+const SESSION_DEEP_LINK_ID = /^(?!\.\.?$)[^\s/?#\\%]{1,256}$/
+
+/** Parse the only identifier accepted by `hermes://session/<id>`. */
+export function parseSessionDeepLinkId(payload: DeepLinkPayload | null | undefined): string | null {
+  const id = payload?.kind === 'session' && typeof payload.name === 'string' ? payload.name : ''
+
+  const hasControlCharacter = [...id].some(character => {
+    const code = character.charCodeAt(0)
+
+    return code < 0x20 || code === 0x7f
+  })
+
+  return SESSION_DEEP_LINK_ID.test(id) && !hasControlCharacter ? id : null
+}
+
 export function resolveDeepLinkAction(payload: DeepLinkPayload | null | undefined): DeepLinkAction {
   if (!payload?.kind) {
+    return { type: 'ignore' }
+  }
+
+  const sessionId = parseSessionDeepLinkId(payload)
+
+  if (sessionId) {
+    return { type: 'session', sessionId }
+  }
+
+  if (payload.kind === 'session') {
     return { type: 'ignore' }
   }
 

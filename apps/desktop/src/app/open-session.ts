@@ -34,6 +34,7 @@ export type OpenSessionIntent = 'in-place' | 'main' | 'stack' | 'tab' | 'window'
 export type OpenSessionNavigate = (to: string, options?: { replace?: boolean }) => void
 
 export interface OpenSessionWorkspaceScope {
+  ownerProfile?: string
   ownerRoute?: SessionProfileRoute
   workspaceMode: WorkspaceMode
   workspaceOwnerKey?: string
