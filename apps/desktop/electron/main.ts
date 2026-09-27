@@ -194,6 +194,7 @@ import type { RosterProfileMetadata } from './connection-registry'
 import { describeCrashReason, installCrashForensics } from './crash-forensics'
 import { adoptServedDashboardToken, resolveServedDashboardToken } from './dashboard-token'
 import { resolveDesktopHermesHome, resolveDesktopUserData } from './data-paths'
+import { createPendingDeepLinkQueue } from './deep-link-queue'
 import { loadOrCreateInstallationId, sshOwnershipId } from './desktop-installation'
 import { formatDesktopLogLine } from './desktop-log-line'
 import {
@@ -18310,7 +18311,7 @@ ipcMain.handle('hermes:vscode-theme:search', async (_event, query) => searchMark
 const HERMES_PROTOCOL = DEV_SERVER ? 'hermes-dev' : 'hermes'
 /** Schemes accepted when parsing inbound URLs (dev accepts both). */
 const DEEPLINK_SCHEMES = DEV_SERVER ? ['hermes-dev', 'hermes'] : ['hermes']
-let _pendingDeepLink = null
+const _pendingDeepLinks = createPendingDeepLinkQueue<{ kind: string; name: string; params: Record<string, string> }>()
 let _rendererReadyForDeepLink = false
 // Set by sendOpenUpdatesRequested() when the renderer cannot hear it yet.
 let _pendingOpenUpdates = false
@@ -18377,17 +18378,15 @@ function handleDeepLink(url) {
   }
 
   if (!_rendererReadyForDeepLink || !mainWindow || mainWindow.isDestroyed()) {
-    _pendingDeepLink = payload
+    _pendingDeepLinks.enqueue(payload)
 
     return
   }
 
   try {
-    if (mainWindow.isMinimized()) {
-      mainWindow.restore()
-    }
-
-    mainWindow.focus()
+    // A deep link is an explicit user action: reveal windows minimized to the
+    // Dock or hidden to the tray before focusing and routing it.
+    focusWindow(mainWindow)
     mainWindow.webContents.send('hermes:deep-link', payload)
     rememberLog(`[deeplink] delivered ${kind}/${name}`)
   } catch (err) {
@@ -18405,9 +18404,7 @@ ipcMain.handle('hermes:deep-link-ready', () => {
     sendOpenUpdatesRequested()
   }
 
-  if (_pendingDeepLink) {
-    const queued = _pendingDeepLink
-    _pendingDeepLink = null
+  for (const queued of _pendingDeepLinks.takeAll()) {
     handleDeepLink(
       `${HERMES_PROTOCOL}://${queued.kind}/${encodeURIComponent(queued.name)}` +
         (Object.keys(queued.params).length ? '?' + new URLSearchParams(queued.params).toString() : '')

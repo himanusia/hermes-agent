@@ -9,7 +9,7 @@ import { $hubInstalledOverride } from '@/store/hub-actions'
 import { requestMcpInstallFromDeepLink } from '@/store/mcp-deeplink-install'
 import { requestPluginCatalogInstallFromDeepLink } from '@/store/plugin-catalog-install'
 import { openPluginInstallRequest } from '@/store/plugin-install-request'
-import { _resetLegacyDiscardForTests } from '@/store/session'
+import { $sessionsLoading, _resetLegacyDiscardForTests } from '@/store/session'
 import { dropSessionState, publishSessionState } from '@/store/session-states'
 import type * as WindowsStore from '@/store/windows'
 import type { SessionInfo } from '@/types/hermes'
@@ -69,6 +69,7 @@ describe('useDesktopIntegrations', () => {
 
   beforeEach(() => {
     window.localStorage.clear()
+    $sessionsLoading.set(false)
     _resetLegacyDiscardForTests()
     vi.mocked(requestMcpInstallFromDeepLink).mockClear()
     vi.mocked(requestPluginCatalogInstallFromDeepLink).mockClear()
@@ -685,6 +686,96 @@ describe('useDesktopIntegrations', () => {
   })
 
   describe('first-party session deep links', () => {
+    it('keeps one deep-link listener across SPA route changes and uses current route state', async () => {
+      let deepLink: ((payload: { kind: string; name: string; params: Record<string, string> }) => void) | undefined
+
+      const row = session({ id: 'route-aware-session', profile: 'default' })
+      const owner = { connectionId: 'local', mode: 'local' as const, profile: 'default' }
+
+      const onDeepLink = vi.fn((callback: typeof deepLink) => {
+        deepLink = callback
+
+        return () => undefined
+      })
+
+      const signalDeepLinkReady = vi.fn()
+
+      desktopWindow.hermesDesktop = {
+        ...desktopWindow.hermesDesktop,
+        onDeepLink,
+        signalDeepLinkReady
+      } as unknown as Window['hermesDesktop']
+      sessionDeepLinkResolution.resolveStoredSession.mockResolvedValue(row)
+      sessionDeepLinkResolution.resolveSessionOwner.mockResolvedValue(owner)
+
+      const { rerender } = render({ profileReady: true, locationPathname: '/', resumeLastSession: false })
+
+      rerender({
+        activeProfile: 'default',
+        locationPathname: '/settings',
+        profileReady: true,
+        resumeExhaustedSessionId: null,
+        resumeLastSession: false,
+        routedSessionId: null,
+        sessions: []
+      })
+
+      expect(onDeepLink).toHaveBeenCalledTimes(1)
+      expect(signalDeepLinkReady).toHaveBeenCalledOnce()
+      expect(deepLink).toBeTypeOf('function')
+
+      await act(async () => deepLink?.({ kind: 'session', name: row.id, params: {} }))
+
+      await waitFor(() => expect(sessionDeepLinkResolution.resolveSessionOwner).toHaveBeenCalledWith(row.id))
+      expect(navigate).toHaveBeenCalledWith(expect.any(String), { replace: true })
+    })
+
+    it('waits for profile and initial session-list readiness before resolving a cold-start link', async () => {
+      let deepLink: ((payload: { kind: string; name: string; params: Record<string, string> }) => void) | undefined
+      const row = session({ id: 'cold-start-session', profile: 'default' })
+      const owner = { connectionId: 'local', mode: 'local' as const, profile: 'default' }
+
+      $sessionsLoading.set(true)
+
+      desktopWindow.hermesDesktop = {
+        ...desktopWindow.hermesDesktop,
+        onDeepLink: (callback: typeof deepLink) => {
+          deepLink = callback
+
+          return () => undefined
+        },
+        signalDeepLinkReady: vi.fn()
+      } as unknown as Window['hermesDesktop']
+      sessionDeepLinkResolution.resolveStoredSession.mockResolvedValue(row)
+      sessionDeepLinkResolution.resolveSessionOwner.mockResolvedValue(owner)
+
+      const { rerender } = render({ profileReady: false, resumeLastSession: false })
+
+      await act(async () => deepLink?.({ kind: 'session', name: row.id, params: {} }))
+
+      expect(sessionDeepLinkResolution.resolveStoredSession).not.toHaveBeenCalled()
+
+      await act(async () => {
+        rerender({
+          activeProfile: 'default',
+          locationPathname: '/',
+          profileReady: true,
+          resumeExhaustedSessionId: null,
+          resumeLastSession: false,
+          routedSessionId: null,
+          sessions: [row]
+        })
+      })
+
+      expect(sessionDeepLinkResolution.resolveStoredSession).not.toHaveBeenCalled()
+
+      act(() => $sessionsLoading.set(false))
+
+      await waitFor(() => expect(sessionDeepLinkResolution.resolveStoredSession).toHaveBeenCalledWith(row.id))
+      expect(sessionDeepLinkResolution.resolveSessionOwner).toHaveBeenCalledWith(row.id)
+      expect(navigate).toHaveBeenCalledWith(sessionRoute(row.id))
+    })
+
     it('resolves the stored session owner before reusing notification stack navigation', async () => {
       let deepLink: ((payload: { kind: string; name: string; params: Record<string, string> }) => void) | undefined
       const row = session({ connection_id: 'remote-writer', id: 'stored-session', profile: 'writer' })
