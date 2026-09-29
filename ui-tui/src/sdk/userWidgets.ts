@@ -5,8 +5,10 @@ import { dirname, join } from 'path'
 import { pathToFileURL } from 'url'
 
 import { Box, Text } from '@hermes/ink'
+import { useStore } from '@nanostores/react'
 import * as React from 'react'
 
+import { $uiState } from '../app/uiStore.js'
 import { Accordion } from '../components/accordion.js'
 import { Shimmer, ShimmerRows, useShimmerPhase } from '../components/loaders.js'
 import { Dialog, Overlay } from '../components/overlay.js'
@@ -53,6 +55,8 @@ export const widgetSdk = {
   sparkRows,
   sparkline,
   updateWidget,
+  /** Current chat's resolved provider; updates after model/session switches. */
+  useSessionProvider: () => useStore($uiState).info?.provider ?? null,
   useShimmerPhase
 } as const
 

@@ -15,6 +15,28 @@ const key = (overrides: Partial<WidgetInput['key']> = {}, ch = ''): WidgetInput 
 beforeEach(() => resetOverlayState())
 
 describe('widget SDK host', () => {
+  it('exposes the active session provider to user widgets, not the default model', async () => {
+    const { patchUiState, resetUiState } = await import('../app/uiStore.js')
+    const { widgetSdk } = await import('../sdk/userWidgets.js')
+    const { renderToScreen } = await import('../../packages/hermes-ink/src/ink/render-to-screen.js')
+    const { createElement } = await import('react')
+    const Provider = () => createElement(widgetSdk.Text, null, widgetSdk.useSessionProvider() ?? 'none')
+    const painted = () => {
+      const { screen } = renderToScreen(createElement(Provider), 50)
+      return Array.from({ length: screen.height }, (_, y) =>
+        Array.from({ length: screen.width }, (_, x) => screen.charPool.get(screen.cells[2 * (y * screen.width + x)]!)).join('')
+      ).join('\n')
+    }
+    try {
+      patchUiState({ info: { model: 'same-model', provider: 'openai-codex', skills: {}, tools: {} } })
+      expect(painted()).toContain('openai-codex')
+      patchUiState({ info: { model: 'same-model', provider: 'commandcode', skills: {}, tools: {} } })
+      expect(painted()).toContain('commandcode')
+    } finally {
+      resetUiState()
+    }
+  })
+
   it('launch → dispatch → close lifecycle drives the overlay slot', () => {
     expect(launchWidget('grid-test', '5x2')).toBeNull()
     expect(getOverlayState().widget).toMatchObject({ appId: 'grid-test' })
