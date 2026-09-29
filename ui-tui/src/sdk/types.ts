@@ -58,7 +58,7 @@ export interface WidgetApp<S = unknown> {
  * Where an ambient widget lives. Two placement families:
  *
  * DOCKS are in-FLOW chrome rows (they reserve real rows, never cover
- * content): `dock-top` under the top status bar, `dock-bottom` above the
+ * content): `dock-top` above the top status rule, `dock-bottom` above the
  * bottom one. Each dock is a right-aligned row of cards.
  *
  * FLOATS overlay the transcript margins without reserving layout

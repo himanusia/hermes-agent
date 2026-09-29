@@ -406,8 +406,8 @@ const ComposerPane = memo(function ComposerPane({
 
       <GoalBar cols={Math.max(1, composer.cols - 2)} />
       <LiveAgentsPanel cols={Math.max(1, composer.cols - 2)} />
-      <StatusRulePane at="top" composer={composer} nativeMode={nativeMode} status={status} />
       <AmbientDock placement="dock-top" />
+      <StatusRulePane at="top" composer={composer} nativeMode={nativeMode} status={status} />
 
       <Box
         flexDirection="column"

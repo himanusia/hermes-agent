@@ -217,8 +217,8 @@ export function ActiveWidgetSlot(): ReactNode {
 }
 
 /** An in-FLOW dock row: reserves real rows in the chrome (never covers
- *  content), right-aligned cards. `dock-top` renders under the top status
- *  bar, `dock-bottom` above the bottom one. */
+ *  content), right-aligned cards. `dock-top` renders above the top status
+ *  rule, `dock-bottom` above the bottom one. */
 export function AmbientDock({ placement }: { placement: 'dock-bottom' | 'dock-top' }): ReactNode {
   const overlay = useStore($overlayState)
   const ctx = useRenderCtx()
