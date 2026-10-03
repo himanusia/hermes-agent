@@ -382,6 +382,9 @@ def prepare_launch(project_root: Path, argv: list[str]) -> Path | None:
     pending = completion_pending_path(root)
     owed_to_cli = current and pending.is_file() and _supervised_child()
     _may_retry, _attempts, _backoff = completion_retry_state(root)
+    # Whether this launch may have changed the dependency generation. Only then does a stale
+    # ``current`` call for a re-exec of the store interpreter (to load the new generation).
+    synced = False
     if not _may_retry and _attempts >= COMPLETION_RETRY_MAX_ATTEMPTS:
         # The tail has failed often enough that every relaunch re-running it
         # does more harm than good (#122206: "every launch burns ~4 minutes").
@@ -409,11 +412,13 @@ def prepare_launch(project_root: Path, argv: list[str]) -> Path | None:
                 # gateway) would boot on a tree built for another interpreter. Sync — never the
                 # tail, which is the updater's — then relaunch below into a current install.
                 _sync_source_dependencies(root, arm=False)
+                synced = True
                 if not pm.venv_is_current(project_root=root):
                     # Relaunching would land back here and sync again, forever.
                     raise RuntimeError("dependency sync left this install out of date")
             else:
                 _finish_source_update(root, current=current, pending=pending)
+                synced = not current
         finally:
             lock.release()
     python = resolve_store_python(root)
@@ -425,7 +430,11 @@ def prepare_launch(project_root: Path, argv: list[str]) -> Path | None:
     # venv interpreter symlinked to the same binary is still a different
     # interpreter (its own sys.prefix) and must re-exec once.
     same = os.path.normcase(os.path.abspath(python)) == os.path.normcase(os.path.abspath(sys.executable))
-    if not current or not same:
+    # A skipped tail (retry cap, backoff) leaves the dependencies stale, and re-execing the
+    # interpreter already running cannot change that: the child lands here again, nesting
+    # the previous ``-c`` program each time until exec fails with E2BIG. Boot on the
+    # previous generation instead, as a failed completion does.
+    if not same or (not current and synced):
         publish_launchers(root)
         return python
     if owed_to_cli:

@@ -567,6 +567,38 @@ def test_capped_completion_attempts_leave_marker_for_explicit_update(source_laun
 
 
 @pytest.mark.platforms("posix")
+@pytest.mark.parametrize("attempts, age", [("99", 1.0), ("2", None)], ids=["capped", "backoff"])
+def test_skipped_tail_on_stale_dependencies_does_not_relaunch_the_store_interpreter(
+        source_launch, tmp_path, monkeypatch, capsys, attempts, age):
+    """A launch that skips the tail (retry cap or backoff) syncs nothing, so re-execing the
+    interpreter it already runs changes nothing: the child lands here again. Each relaunch
+    nests the previous ``-c`` program, so the loop only stops at E2BIG. Degrade instead."""
+    root, store_python, _ = source_launch
+    from hermes_cli.venv_sync import _completion_attempts_path, arm_completion
+
+    pm.sync_venv(["all"], explicit=True, project_root=root)
+    lock = root / "uv.lock"
+    lock.write_bytes(lock.read_bytes() + b"\n# a source update moved the lock\n")
+    assert not pm.venv_is_current(project_root=root)
+    arm_completion(root)
+    record = _completion_attempts_path(root)
+    record.write_text(f"{attempts}\n", encoding="utf-8")
+    if age is not None:
+        os.utime(record, (age, age))
+    receipts = _receipts(tmp_path)
+
+    # Already the store interpreter: relaunching it is the loop.
+    monkeypatch.setattr(sys, "executable", str(store_python))
+    assert venv_sync.prepare_launch(root, []) is None
+    assert capsys.readouterr().err.count("could not be finished automatically") <= 1
+    # Another interpreter still switches once (the child is then the store interpreter).
+    monkeypatch.setattr(sys, "executable", "/elsewhere/bin/python3")
+    assert venv_sync.prepare_launch(root, []) == store_python
+    assert _receipts(tmp_path) == receipts, "a skipped tail must not sync"
+    assert not (tmp_path / "completion-calls").exists(), "a skipped tail must not run"
+
+
+@pytest.mark.platforms("posix")
 def test_failed_tail_attempt_is_counted_and_success_clears_it(source_launch, tmp_path, monkeypatch, capsys):
     """A failing completion tail records the attempt; the successful retry clears the record."""
     root, store_python, _ = source_launch
