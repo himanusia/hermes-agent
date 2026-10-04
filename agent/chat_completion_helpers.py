@@ -1915,6 +1915,21 @@ def _rebind_fallback_credential_pool(agent, fb_provider: str, fb_model: str) -> 
             logger.debug("Fallback to %s/%s: could not attach credential pool: %s", fb_provider, fb_model, exc)
 
 
+def emit_model_switched(agent, *, old_model, old_provider, new_model, new_provider, kind: str) -> None:
+    """Tell live surfaces the serving model changed mid-session (fallback on/off) so a status bar
+    can show the model actually answering instead of the one picked at session start.
+    Best-effort: a surface error must never undo the switch."""
+    cb = getattr(agent, "event_callback", None)
+    if not cb:
+        return
+    with contextlib.suppress(Exception):
+        cb("agent:model_switched", {
+            "session_id": getattr(agent, "session_id", "") or "", "kind": kind,
+            "old_model": str(old_model or ""), "old_provider": str(old_provider or ""),
+            "model": str(new_model or ""), "provider": str(new_provider or ""),
+        })
+
+
 def _log_fallback_activated(agent, reason, old_model, old_provider, fb_model, fb_provider) -> None:
     """A billing switch is a WARNING naming the profile, both models and the remedy: the gateway
     persists the turn as a transient failure otherwise, and nothing in the log says the paid
@@ -2183,6 +2198,8 @@ def try_activate_fallback(agent, reason: "FailoverReason | None" = None, reset_a
             agent._provider_fallback_active = True
             agent._provider_fallback_route = (str(fb_model), str(fb_provider))
             _log_fallback_activated(agent, reason, old_model, old_provider, fb_model, fb_provider)
+            emit_model_switched(agent, old_model=old_model, old_provider=old_provider,
+                                new_model=fb_model, new_provider=fb_provider, kind="fallback")
             from hermes_cli.observability.shared_metrics_events import record_fallback
             record_fallback(from_provider=old_provider, to_provider=fb_provider, reason=reason)
             # The stale-call streak measured the OLD provider; carrying it over would
