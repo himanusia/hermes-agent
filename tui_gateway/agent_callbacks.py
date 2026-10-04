@@ -114,6 +114,16 @@ def _agent_status_update(sid: str, kind: str, text: str | None = None) -> None:
     _status_update(sid, str(kind), None if text is None else str(text))
 
 
+def _agent_event(sid: str, event_type: str, ctx: dict | None = None) -> None:
+    if event_type != "agent:model_switched":
+        return
+    session = _sessions.get(sid)
+    if not session:
+        return
+    with contextlib.suppress(Exception):
+        _emit("session.info", sid, _session_info(session.get("agent"), session))
+
+
 def _agent_thinking_update(sid: str, text: str) -> None:
     from gateway.warning_notifications import DiagnosticText
     # Wait notices and the quiet spinner share this callback with diagnostics.
@@ -159,6 +169,9 @@ def _agent_cbs(sid: str) -> dict:
         "reaction_callback": lambda kind: _emit("reaction", sid, {"kind": kind}),
         "reasoning_callback": lambda text: _emit_reasoning_delta(sid, text),
         "status_callback": lambda kind, text=None: _agent_status_update(sid, kind, text),
+        # Fallback on/off swaps agent.model mid-turn: re-emit session.info so the status bar
+        # names the model actually answering, not the one picked at session start.
+        "event_callback": lambda event_type, ctx=None: _agent_event(sid, event_type, ctx),
         # Credits/notice spine: AgentNotice → notification.show; recovery → notification.clear.
         "notice_callback": lambda n: _agent_notice_update(sid, n),
         "notice_clear_callback": lambda key: _emit("notification.clear", sid, {"key": key}),

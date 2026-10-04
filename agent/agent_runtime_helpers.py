@@ -1515,6 +1515,9 @@ def restore_primary_runtime(agent) -> bool:
         agent._provider_fallback_active = False
         agent._provider_fallback_route = None
         if provider_fallback_active:
+            from agent.chat_completion_helpers import emit_model_switched
+            emit_model_switched(agent, old_model=previous_model, old_provider=previous_provider,
+                                new_model=agent.model, new_provider=agent.provider, kind="restore")
             # Notification surfaces are best-effort and must never undo a successful restore.
             with contextlib.suppress(Exception):
                 agent._emit_diagnostic_status(
